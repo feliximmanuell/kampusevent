@@ -1,0 +1,18 @@
+{
+  "name": "kampusevent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "KampusEvent - aplikasi manajemen dan registrasi event kampus (React + Express + PostgreSQL) yang di-deploy dengan Docker Compose dan CI/CD GitHub Actions",
+  "scripts": {
+    "install:all": "npm --prefix backend install && npm --prefix frontend install",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "test": "npm --prefix backend test && npm --prefix frontend test",
+    "typecheck": "npm --prefix backend run typecheck && npm --prefix frontend run typecheck",
+    "compose:up": "docker compose up -d --build",
+    "compose:down": "docker compose down",
+    "compose:logs": "docker compose logs -f --tail=100",
+    "compose:ps": "docker compose ps",
+    "seed": "docker compose exec backend node prisma/seed.js"
+  }
+}

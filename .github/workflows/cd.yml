@@ -1,0 +1,169 @@
+name: CD
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Tag image yang akan di-deploy (contoh: v1.0.0, latest, atau sha pendek)'
+        required: true
+        default: v1.0.0
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-release:
+    name: Build image rilis
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [backend, frontend]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Owner dalam huruf kecil
+        id: owner
+        run: echo "name=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login ke GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Metadata image rilis
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.owner.outputs.name }}/kampusevent-${{ matrix.service }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+            type=raw,value=latest
+
+      - name: Build & push image rilis
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.service }}
+          file: ./${{ matrix.service }}/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }}
+          provenance: true
+          sbom: true
+
+  deploy:
+    name: Deploy ke host produksi
+    needs: [build-release]
+    if: >-
+      always() &&
+      (needs.build-release.result == 'success' || needs.build-release.result == 'skipped')
+    runs-on: [self-hosted, Windows, X64, kampusevent]
+    environment:
+      name: production
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+
+    env:
+      IMAGE_TAG: ${{ (github.event_name == 'workflow_dispatch' && inputs.image_tag) || github.ref_name }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Tulis file .env di host deploy
+        shell: powershell
+        run: |
+          $owner = '${{ github.repository_owner }}'.ToLower()
+          $content = @"
+          POSTGRES_DB=${{ vars.POSTGRES_DB || 'kampusevent' }}
+          POSTGRES_USER=${{ vars.POSTGRES_USER || 'kampusevent' }}
+          POSTGRES_PASSWORD=$env:POSTGRES_PASSWORD
+          DATABASE_URL=postgresql://${{ vars.POSTGRES_USER || 'kampusevent' }}:$env:POSTGRES_PASSWORD@db:5432/${{ vars.POSTGRES_DB || 'kampusevent' }}?schema=public
+          JWT_SECRET=$env:JWT_SECRET
+          JWT_EXPIRES_IN=7d
+          CORS_ORIGIN=*
+          GHCR_OWNER=$owner
+          IMAGE_TAG=${{ env.IMAGE_TAG }}
+          APP_PORT=${{ vars.APP_PORT || '80' }}
+          SEED_ON_START=true
+          COMPOSE_PROFILES=${{ vars.COMPOSE_PROFILES }}
+          NGROK_AUTHTOKEN=${{ secrets.NGROK_AUTHTOKEN }}
+          NGROK_URL=${{ vars.NGROK_URL }}
+          "@
+          [System.IO.File]::WriteAllText("$PWD\.env", $content, [System.Text.UTF8Encoding]::new($false))
+          Write-Host "File .env dibuat untuk tag ${{ env.IMAGE_TAG }}"
+
+      - name: Login ke GHCR
+        shell: powershell
+        run: |
+          $env:GHCR_TOKEN = '${{ secrets.GITHUB_TOKEN }}'
+          $env:GHCR_TOKEN | docker login ${{ env.REGISTRY }} --username ${{ github.actor }} --password-stdin
+
+      - name: Tarik image terbaru
+        shell: powershell
+        run: docker compose pull
+
+      - name: Jalankan stack
+        shell: powershell
+        run: docker compose up -d --remove-orphans
+
+      - name: Status container
+        shell: powershell
+        run: docker compose ps
+
+      - name: Smoke test
+        shell: powershell
+        env:
+          APP_PORT: ${{ vars.APP_PORT || '80' }}
+        run: |
+          $url = "http://localhost:$env:APP_PORT/healthz"
+          $ok = $false
+          for ($i = 1; $i -le 30; $i++) {
+            try {
+              $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5
+              if ($response.StatusCode -eq 200) {
+                Write-Host "Aplikasi sehat: $url"
+                Write-Host $response.Content
+                $ok = $true
+                break
+              }
+            } catch {
+              Write-Host "Percobaan $i/30 gagal, menunggu 3 detik..."
+              Start-Sleep -Seconds 3
+            }
+          }
+          if (-not $ok) {
+            docker compose logs --no-color --tail 100
+            throw "Smoke test gagal: aplikasi tidak merespons di $url"
+          }
+
+      - name: Bersihkan image lama
+        shell: powershell
+        run: docker image prune -f
