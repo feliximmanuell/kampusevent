@@ -55,9 +55,12 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ steps.owner.outputs.name }}/kampusevent-${{ matrix.service }}
+          # type=raw dengan nama ref wajib ada: job deploy memakai
+          # IMAGE_TAG=github.ref_name (v1.0.0) untuk docker compose pull.
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ github.ref_name }}
             type=sha,format=short
             type=raw,value=latest
 
