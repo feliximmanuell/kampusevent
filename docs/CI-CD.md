@@ -196,3 +196,40 @@ Catatan keamanan: runner hanya menerima job CD dari tag/manual pada repository s
 6. Tunjukkan workflow **CD** berjalan: build rilis → deploy di runner → smoke test.
 7. Buka aplikasi dari URL tunnel → tunjukkan perubahan sudah live.
 8. Demonstrasi rollback dengan `image_tag` versi sebelumnya.
+
+## 8. Kendala yang ditemui: login GHCR di runner Windows
+
+Saat CD pertama kali dijalankan dari tag `v1.0.0`, job `deploy` gagal pada langkah
+login ke GHCR dengan pesan berikut.
+
+```text
+Error response from daemon: Get "https://ghcr.io/v2/": denied: denied
+```
+
+Penyebabnya bukan izin token. Job `build-release` pada run yang sama berhasil login
+dengan token yang sama. Masalahnya ada pada cara login di runner Windows.
+
+```powershell
+$env:GHCR_TOKEN | docker login ghcr.io --username <user> --password-stdin
+```
+
+PowerShell mengirim data ke `docker.exe` melalui pipe dengan tambahan `CRLF`,
+sehingga token yang terbaca mengandung karakter `\r` di belakangnya dan ditolak
+oleh GHCR.
+
+Perbaikan dilakukan dengan memakai action resmi yang membaca secret tanpa
+melewati pipe PowerShell.
+
+```yaml
+      - name: Login ke GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+```
+
+Setelah perbaikan, CD dijalankan ulang dengan `image_tag` `v1.0.0` tanpa build
+ulang, lalu dirilis ulang sebagai tag `v1.0.1` agar seluruh pipeline berjalan dari
+awal. Hasilnya seluruh langkah hijau: build image, tarik image, jalankan stack, dan
+smoke test.
