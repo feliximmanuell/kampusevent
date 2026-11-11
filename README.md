@@ -335,11 +335,11 @@ Di CI, integration test dijalankan otomatis menggunakan service container Postgr
 
 | No | Nama | NIM | Peran |
 |---|---|---|---|
-| 1 | _isi nama_ | _isi NIM_ | Ketua / DevOps Lead |
-| 2 | _isi nama_ | _isi NIM_ | Backend Developer |
-| 3 | _isi nama_ | _isi NIM_ | Frontend Developer |
-| 4 | _isi nama_ | _isi NIM_ | Database & Security |
-| 5 | _isi nama_ | _isi NIM_ | Dokumentasi & Media |
+| 1 | _Felix Immanuel_ | _ 231110056_ | Ketua / DevOps Lead |
+| 2 | _iLim Vardo_ | _  231110172_ | Backend Developer |
+| 3 | _Jenifer_ | _231110473_ | Frontend Developer |
+| 4 | _Calvin Louis_ | _ 231110534_ | Database & Security |
+| 5 | _Elly Carollin_ | _231110149_ | Dokumentasi & Media |
 
 ---
 
